@@ -37,6 +37,7 @@ jobs:
       
       - name: 🚀 Create preview
         uses: expo/expo-github-action/preview@v8
+        id: preview
         with:
           comment: true
           qr-target: 'expo-go'
