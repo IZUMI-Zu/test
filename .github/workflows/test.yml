@@ -1,47 +1,54 @@
-# name: Expo Setup and Preview
+name: Preview
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
-# on:
-#   pull_request_target:
-#     types: [opened, synchronize, reopened]
-
-# jobs:
-#   setup-expo-token:
-#     if: ${{ github.event_name == 'pull_request_target' }}
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v3
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment: preview
     
-#       - name: Setup Node
-#         uses: actions/setup-node@v3
-#         with:
-#           node-version: 20.x
-#           cache: npm
+    # Only run this job if the PR is from a fork
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    
+    steps:
+      - name: 🏗 Setup repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+          cache: npm
+      
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          eas-cache: true
+          expo-version: latest
+          expo-cache: true
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: 📦 Install dependencies
+        run: npm install
+      
+      - name: 🚀 Create preview
+        uses: expo/expo-github-action/preview@v8
+        with:
+          comment: true
+          qr-target: 'expo-go'
+          working-directory: ${{ github.workspace }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          command: eas update --auto --branch ${{ github.event.pull_request.head.ref }}
 
-#       - name: Setup Expo
-#         uses: expo/expo-github-action@v8
-#         with:
-#           eas-version: latest
-#           eas-cache: true
-#           expo-version: latest
-#           expo-cache: true
-#           packager: npm
-#           token: ${{ secrets.EXPO_TOKEN }}
-
-#       - name: Install dependencies
-#         run: npm install
-
-#       - name: Create preview
-#         id: preview
-#         uses: expo/expo-github-action/preview@v8
-#         with:
-#           qr-target: expo-go
-#           command: eas update --auto --branch pr-${{ github.event.number }}
-
-#       - name: 💬 Comment PR
-#         uses: thollander/actions-comment-pull-request@v2
-#         env:
-#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#         with:
-#           comment_tag: execution
-#           message: ${{steps.preview.outputs.comment}}
+      - name: 💬 Comment PR
+        uses: thollander/actions-comment-pull-request@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          comment_tag: execution
+          message: ${{steps.preview.outputs.comment}}
