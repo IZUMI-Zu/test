@@ -7,9 +7,6 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     
-    # Only run this job if the PR is from a fork
-    if: github.event.pull_request.head.repo.full_name != github.repository
-    
     steps:
       - name: 🏗 Setup repo
         uses: actions/checkout@v3
@@ -39,11 +36,11 @@ jobs:
         uses: expo/expo-github-action/preview@v8
         id: preview
         with:
-          comment: true
+          comment: false
           qr-target: 'expo-go'
           working-directory: ${{ github.workspace }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch ${{ github.event.pull_request.head.ref }}
+          command: eas update --auto --branch pr-${{ github.event.number }}-${{ github.event.pull_request.head.ref }}
 
       - name: 💬 Comment PR
         uses: thollander/actions-comment-pull-request@v2
@@ -51,4 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           comment_tag: execution
-          message: ${{steps.preview.outputs.comment}}
+          message: |
+            ${{steps.preview.outputs.comment}}
+            > commit hash: ${{steps.preview.outputs.gitCommitHash}}
+            > create time: ${{steps.preview.outputs.createdAt}}
