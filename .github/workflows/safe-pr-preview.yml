@@ -1,0 +1,95 @@
+name: Safe Expo Preview
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  check_comments:
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/preview')
+    steps:
+      - name: Check if comment is from a collaborator
+        id: is_collaborator
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { data: isCollaborator } = await github.rest.repos.checkCollaborator({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login
+            })
+            return isCollaborator
+      
+      - name: Get PR details
+        if: steps.is_collaborator.outputs.result == 'true'
+        id: pr_details
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            })
+            return { 
+              sha: pr.head.sha,
+              ref: pr.head.ref,
+              number: pr.number
+            }
+
+  preview:
+    needs: check_comments
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏗 Setup repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ fromJson(needs.check_comments.outputs.result).sha }}
+      
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+          cache: npm
+      
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          eas-cache: true
+          expo-version: latest
+          expo-cache: true
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: 📦 Install dependencies
+        run: npm install
+      
+      - name: 🚀 Create preview
+        uses: expo/expo-github-action/preview@v8
+        id: preview
+        with:
+          comment: false
+          qr-target: 'expo-go'
+          working-directory: ${{ github.workspace }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          command: eas update --auto --branch pr-${{ fromJson(needs.check_comments.outputs.result).number }}-${{ fromJson(needs.check_comments.outputs.result).ref }}
+      
+      - name: 💬 Comment PR
+        uses: actions/github-script@v6
+        env:
+          PREVIEW_COMMENT: ${{steps.preview.outputs.comment}}
+          COMMIT_HASH: ${{steps.preview.outputs.gitCommitHash}}
+          CREATED_AT: ${{steps.preview.outputs.createdAt}}
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${process.env.PREVIEW_COMMENT}
+              > commit hash: ${process.env.COMMIT_HASH}
+              > create time: ${process.env.CREATED_AT}`
+            })
