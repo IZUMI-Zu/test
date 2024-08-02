@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - mian
   pull_request:
     branches:
-      - master
+      - mian
 
 jobs:
   build-apk:
