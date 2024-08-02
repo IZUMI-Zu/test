@@ -1,9 +1,7 @@
 name: Safe Expo Preview
-
 on:
   issue_comment:
     types: [created]
-
 jobs:
   check_comments:
     runs-on: ubuntu-latest
@@ -18,40 +16,50 @@ jobs:
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const { data: isCollaborator } = await github.rest.repos.checkCollaborator({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.payload.comment.user.login
-            })
-            return isCollaborator
+            try {
+              const { data: isCollaborator } = await github.rest.repos.checkCollaborator({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.payload.comment.user.login
+              })
+              return isCollaborator
+            } catch (error) {
+              console.error('Error checking collaborator status:', error)
+              return false
+            }
       
       - name: Get PR details
-        if: steps.is_collaborator.outputs.result == 'true'
         id: pr_details
+        if: steps.is_collaborator.outputs.result == 'true'
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            })
-            return JSON.stringify({ 
-              sha: pr.head.sha,
-              ref: pr.head.ref,
-              number: pr.number
-            })
+            try {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              })
+              return JSON.stringify({ 
+                sha: pr.head.sha,
+                ref: pr.head.ref,
+                number: pr.number
+              })
+            } catch (error) {
+              console.error('Error fetching PR details:', error)
+              return '{}'
+            }
 
   preview:
     needs: check_comments
-    if: needs.check_comments.outputs.is_collaborator == 'true'
+    if: needs.check_comments.outputs.is_collaborator == 'true' && fromJson(needs.check_comments.outputs.pr_details || '{}').sha
     runs-on: ubuntu-latest
     steps:
       - name: 🏗 Setup repo
         uses: actions/checkout@v3
         with:
-          ref: ${{ fromJson(needs.check_comments.outputs.pr_details).sha }}
+          ref: ${{ fromJson(needs.check_comments.outputs.pr_details || '{}').sha }}
       
       - name: Setup Node
         uses: actions/setup-node@v3
@@ -80,9 +88,10 @@ jobs:
           qr-target: 'expo-go'
           working-directory: ${{ github.workspace }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch pr-${{ fromJson(needs.check_comments.outputs.pr_details).number }}-${{ fromJson(needs.check_comments.outputs.pr_details).ref }}
+          command: eas update --auto --branch safe-pr-${{ fromJson(needs.check_comments.outputs.pr_details || '{}').number }}-${{ fromJson(needs.check_comments.outputs.pr_details || '{}').ref }}
       
       - name: 💬 Comment PR
+        if: success()
         uses: actions/github-script@v6
         env:
           PREVIEW_COMMENT: ${{steps.preview.outputs.comment}}
