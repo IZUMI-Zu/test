@@ -116,7 +116,7 @@ jobs:
             ## Expo Preview
             ${{steps.preview.outputs.comment}}
             > Commit hash: ${{steps.preview.outputs.gitCommitHash}}
-            > Update published at: ${{ steps.preview.outputs.publishedTime }}
+            > Update published at: ${{steps.preview.outputs.createdAt}}
           edit-mode: replace
 
   pr_comment:
