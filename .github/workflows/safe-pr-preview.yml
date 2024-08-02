@@ -71,9 +71,25 @@ jobs:
     if: needs.check_permissions.outputs.has_permissions == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Get PR details
+        uses: actions/github-script@v6
+        id: pr-details
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ needs.check_permissions.outputs.pr_number }}
+            });
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('head_repo', pr.head.repo.full_name);
+            core.setOutput('head_ref', pr.head.ref);
+
       - uses: actions/checkout@v3
         with:
-          ref: ${{ needs.check_permissions.outputs.pr_head_ref }}
+          repository: ${{ steps.pr-details.outputs.head_repo }}
+          ref: ${{ steps.pr-details.outputs.head_ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
