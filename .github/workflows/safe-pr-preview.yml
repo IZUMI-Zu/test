@@ -2,6 +2,7 @@ name: Safe Expo Preview
 on:
   issue_comment:
     types: [created]
+
 jobs:
   check_comments:
     runs-on: ubuntu-latest
@@ -22,10 +23,10 @@ jobs:
                 repo: context.repo.repo,
                 username: context.payload.comment.user.login
               })
-              return isCollaborator
+              return isCollaborator ? 'true' : 'false'
             } catch (error) {
               console.error('Error checking collaborator status:', error)
-              return false
+              return 'false'
             }
       
       - name: Get PR details
@@ -59,14 +60,8 @@ jobs:
       - name: 🏗 Setup repo
         uses: actions/checkout@v3
         with:
-          ref: ${{ fromJson(needs.check_comments.outputs.pr_details || '{"sha":""}').sha }}
-          if: needs.check_comments.outputs.is_collaborator == 'true' && fromJson(needs.check_comments.outputs.pr_details || '{}').sha
+          ref: ${{ fromJson(needs.check_comments.outputs.pr_details).sha || 'main' }}
 
-      - name: 🏗 Setup repo
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ fromJson(needs.check_comments.outputs.pr_details || '{}').sha }}
-      
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
@@ -92,9 +87,8 @@ jobs:
         with:
           comment: false
           qr-target: 'expo-go'
-          working-directory: ${{ github.workspace }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch safe-pr-${{ fromJson(needs.check_comments.outputs.pr_details || '{}').number }}-${{ fromJson(needs.check_comments.outputs.pr_details || '{}').ref }}
+          command: eas update --auto --branch safe-pr-${{ fromJson(needs.check_comments.outputs.pr_details).number }}-${{ fromJson(needs.check_comments.outputs.pr_details).ref }}
       
       - name: 💬 Comment PR
         if: success()
