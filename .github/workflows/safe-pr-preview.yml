@@ -1,8 +1,6 @@
 name: Safe Expo Preview
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
@@ -14,7 +12,7 @@ permissions:
 jobs:
   check_permissions:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/preview') && github.event.issue.pull_request)
+    if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/preview') && github.event.issue.pull_request
     outputs:
       has_permissions: ${{ steps.check.outputs.has_permissions }}
       pr_number: ${{ steps.get_pr_details.outputs.pr_number }}
@@ -22,48 +20,30 @@ jobs:
     steps:
       - name: Get PR details
         id: get_pr_details
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            let prNumber, prHeadRef;
-            if (context.eventName === 'pull_request') {
-              prNumber = context.issue.number;
-              prHeadRef = context.payload.pull_request.head.ref;
-            } else {
-              const { data: pullRequest } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              prNumber = pullRequest.number;
-              prHeadRef = pullRequest.head.ref;
-            }
-            core.setOutput('pr_number', prNumber);
-            core.setOutput('pr_head_ref', prHeadRef);
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('pr_number', pullRequest.number);
+            core.setOutput('pr_head_ref', pullRequest.head.ref);
 
       - name: Check permissions
         id: check
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            let hasPermissions = false;
-            if (context.eventName === 'pull_request') {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              hasPermissions = !pr.head.repo.fork;
-            } else if (context.eventName === 'issue_comment') {
-              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: context.payload.comment.user.login
-              });
-              hasPermissions = ['admin', 'write'].includes(permission.permission);
-            }
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login
+            });
+            const hasPermissions = ['admin', 'write'].includes(permission.permission);
             core.setOutput('has_permissions', hasPermissions);
 
   preview:
@@ -72,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get PR details
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         id: pr-details
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
@@ -86,19 +66,19 @@ jobs:
             core.setOutput('head_repo', pr.head.repo.full_name);
             core.setOutput('head_ref', pr.head.ref);
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: ${{ steps.pr-details.outputs.head_repo }}
           ref: ${{ steps.pr-details.outputs.head_ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -117,15 +97,15 @@ jobs:
           comment: false
           qr-target: 'expo-go'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch safe-pr-${{ needs.check_permissions.outputs.pr_head_ref }}
+          command: eas update --auto --branch pr-${{ needs.check_permissions.outputs.pr_head_ref }}
 
       - name: Find Comment
-        uses: peter-evans/find-comment@v2
+        uses: peter-evans/find-comment@v3
         id: find_comment
         with:
           issue-number: ${{ needs.check_permissions.outputs.pr_number }}
           comment-author: 'github-actions[bot]'
-          body-includes: Safe Expo Preview
+          body-includes: Expo Preview
 
       - name: Create or Update Comment
         uses: peter-evans/create-or-update-comment@v4
@@ -133,7 +113,7 @@ jobs:
           issue-number: ${{ needs.check_permissions.outputs.pr_number }}
           comment-id: ${{ steps.find_comment.outputs.comment-id }}
           body: |
-            ## Safe Expo Preview
+            ## Expo Preview
             ${{steps.preview.outputs.comment}}
             > Commit hash: ${{steps.preview.outputs.gitCommitHash}}
             > Update published at: ${{ steps.preview.outputs.publishedTime }}
@@ -145,9 +125,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Comment on PR (insufficient permissions)
-        if: ${{ github.event_name != 'pull_request' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ needs.check_permissions.outputs.pr_number }}
           body: |
-            Sorry, you do not have the required permissions to trigger an Expo preview. Please ask a maintainer to review and trigger the preview if necessary.
+            Sorry, you do not have the required permissions to trigger an Expo preview. 
+            Please ask a maintainer to review and trigger the preview if necessary.
