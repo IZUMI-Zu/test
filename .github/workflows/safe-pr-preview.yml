@@ -1,17 +1,33 @@
 name: Safe Expo Preview
 on:
-  pull_request_review_comment:
+  issue_comment:
     types: [created]
 
 jobs:
   check_comment:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/preview')
+    if: contains(github.event.comment.body, '/preview') && github.event.issue.pull_request
     outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
+      should_run: ${{ steps.check_permission.outputs.has_permission }}
+      pr_number: ${{ steps.get_pr_details.outputs.pr_number }}
+      pr_head_ref: ${{ steps.get_pr_details.outputs.pr_head_ref }}
     steps:
-      - name: Check comment author
-        id: check
+      - name: Get PR details
+        id: get_pr_details
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('pr_number', pullRequest.number);
+            core.setOutput('pr_head_ref', pullRequest.head.ref);
+
+      - name: Check comment author permission
+        id: check_permission
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
@@ -21,7 +37,7 @@ jobs:
               repo: context.repo.repo,
               username: context.payload.comment.user.login
             });
-            return permission.permission !== 'none';
+            core.setOutput('has_permission', permission.permission !== 'none');
 
   preview:
     needs: check_comment
@@ -57,21 +73,20 @@ jobs:
           comment: false
           qr-target: 'expo-go'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch safe-pr-${{ github.event.pull_request.head.ref }}
+          command: eas update --auto --branch safe-pr-${{ needs.check_comment.outputs.pr_head_ref }}
       
-          
       - name: Find Comment
         uses: peter-evans/find-comment@v2
         id: find_comment
         with:
-          issue-number: ${{ github.event.pull_request.number }}
+          issue-number: ${{ needs.check_comment.outputs.pr_number }}
           comment-author: 'github-actions[bot]'
           body-includes: Expo preview
 
       - name: Create or Update Comment
         uses: peter-evans/create-or-update-comment@v4
         with:
-          issue-number: ${{ github.event.pull_request.number }}
+          issue-number: ${{ needs.check_comment.outputs.pr_number }}
           comment-id: ${{ steps.find_comment.outputs.comment-id }}
           body: |
             ## Expo Preview
