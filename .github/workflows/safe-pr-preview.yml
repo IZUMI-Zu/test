@@ -1,14 +1,16 @@
-name: Safe Expo Preview
+name: Expo Preview
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
 jobs:
-  check_comment:
+  check_permissions:
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/preview') && github.event.issue.pull_request
+    if: github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/preview') && github.event.issue.pull_request)
     outputs:
-      should_run: ${{ steps.check_permission.outputs.has_permission }}
+      has_permissions: ${{ steps.check.outputs.has_permissions }}
       pr_number: ${{ steps.get_pr_details.outputs.pr_number }}
       pr_head_ref: ${{ steps.get_pr_details.outputs.pr_head_ref }}
     steps:
@@ -18,30 +20,49 @@ jobs:
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const { data: pullRequest } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
-            core.setOutput('pr_number', pullRequest.number);
-            core.setOutput('pr_head_ref', pullRequest.head.ref);
+            let prNumber, prHeadRef;
+            if (context.eventName === 'pull_request') {
+              prNumber = context.issue.number;
+              prHeadRef = context.payload.pull_request.head.ref;
+            } else {
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              prNumber = pullRequest.number;
+              prHeadRef = pullRequest.head.ref;
+            }
+            core.setOutput('pr_number', prNumber);
+            core.setOutput('pr_head_ref', prHeadRef);
 
-      - name: Check comment author permission
-        id: check_permission
+      - name: Check permissions
+        id: check
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.payload.comment.user.login
-            });
-            core.setOutput('has_permission', permission.permission !== 'none');
+            let hasPermissions = false;
+            if (context.eventName === 'pull_request') {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              hasPermissions = !pr.head.repo.fork;
+            } else if (context.eventName === 'issue_comment') {
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.payload.comment.user.login
+              });
+              hasPermissions = ['admin', 'write'].includes(permission.permission);
+            }
+            core.setOutput('has_permissions', hasPermissions);
 
   preview:
-    needs: check_comment
-    if: needs.check_comment.outputs.should_run == 'true'
+    needs: check_permissions
+    if: needs.check_permissions.outputs.has_permissions == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -73,24 +94,45 @@ jobs:
           comment: false
           qr-target: 'expo-go'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch safe-pr-${{ needs.check_comment.outputs.pr_head_ref }}
-      
+          command: eas update --auto --branch safe-pr-${{ needs.check_permissions.outputs.pr_head_ref }}
+
       - name: Find Comment
         uses: peter-evans/find-comment@v2
         id: find_comment
         with:
-          issue-number: ${{ needs.check_comment.outputs.pr_number }}
+          issue-number: ${{ needs.check_permissions.outputs.pr_number }}
           comment-author: 'github-actions[bot]'
-          body-includes: Expo preview
+          body-includes: Safe Expo Preview
 
       - name: Create or Update Comment
         uses: peter-evans/create-or-update-comment@v4
         with:
-          issue-number: ${{ needs.check_comment.outputs.pr_number }}
+          issue-number: ${{ needs.check_permissions.outputs.pr_number }}
           comment-id: ${{ steps.find_comment.outputs.comment-id }}
           body: |
-            ## Expo Preview
+            ## Safe Expo Preview
             ${{steps.preview.outputs.comment}}
             > Commit hash: ${{steps.preview.outputs.gitCommitHash}}
             > Update published at: ${{ steps.preview.outputs.publishedTime }}
           edit-mode: replace
+
+  pr_comment:
+    needs: check_permissions
+    if: needs.check_permissions.outputs.has_permissions != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const message = context.eventName === 'pull_request'
+              ? 'Sorry, we cannot create an Expo preview for pull requests from forked repositories due to security restrictions. A maintainer will need to manually trigger the preview.'
+              : 'Sorry, you do not have the required permissions to trigger an Expo preview. Please ask a maintainer to review and trigger the preview if necessary.';
+            
+            github.rest.issues.createComment({
+              issue_number: ${{ needs.check_permissions.outputs.pr_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            })
