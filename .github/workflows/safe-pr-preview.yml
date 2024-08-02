@@ -53,9 +53,15 @@ jobs:
 
   preview:
     needs: check_comments
-    if: needs.check_comments.outputs.is_collaborator == 'true' && fromJson(needs.check_comments.outputs.pr_details || '{}').sha
+    if: needs.check_comments.outputs.is_collaborator == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: 🏗 Setup repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ fromJson(needs.check_comments.outputs.pr_details || '{"sha":""}').sha }}
+          if: needs.check_comments.outputs.is_collaborator == 'true' && fromJson(needs.check_comments.outputs.pr_details || '{}').sha
+
       - name: 🏗 Setup repo
         uses: actions/checkout@v3
         with:
