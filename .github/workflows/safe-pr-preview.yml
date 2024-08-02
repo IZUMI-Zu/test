@@ -1,73 +1,45 @@
 name: Safe Expo Preview
 on:
-  issue_comment:
+  pull_request_review_comment:
     types: [created]
 
 jobs:
-  check_comments:
+  check_comment:
     runs-on: ubuntu-latest
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '/preview')
+    if: contains(github.event.comment.body, '/preview')
     outputs:
-      is_collaborator: ${{ steps.is_collaborator.outputs.result }}
-      pr_details: ${{ steps.pr_details.outputs.result }}
+      should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - name: Check if comment is from a collaborator
-        id: is_collaborator
+      - name: Check comment author
+        id: check
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            try {
-              const { data: isCollaborator } = await github.rest.repos.checkCollaborator({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: context.payload.comment.user.login
-              })
-              return isCollaborator ? 'true' : 'false'
-            } catch (error) {
-              console.error('Error checking collaborator status:', error)
-              return 'false'
-            }
-      
-      - name: Get PR details
-        id: pr_details
-        if: steps.is_collaborator.outputs.result == 'true'
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            try {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              })
-              return JSON.stringify({ 
-                sha: pr.head.sha,
-                ref: pr.head.ref,
-                number: pr.number
-              })
-            } catch (error) {
-              console.error('Error fetching PR details:', error)
-              return '{}'
-            }
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login
+            });
+            return permission.permission !== 'none';
 
   preview:
-    needs: check_comments
-    if: needs.check_comments.outputs.is_collaborator == 'true'
+    needs: check_comment
+    if: needs.check_comment.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: 🏗 Setup repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
-          ref: ${{ fromJson(needs.check_comments.outputs.pr_details).sha || 'main' }}
+          fetch-depth: 0
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20.x
-          cache: npm
-      
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
@@ -77,34 +49,33 @@ jobs:
           expo-cache: true
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
-      
-      - name: 📦 Install dependencies
-        run: npm install
-      
-      - name: 🚀 Create preview
-        uses: expo/expo-github-action/preview@v8
+
+      - name: Create preview
         id: preview
+        uses: expo/expo-github-action/preview@v8
         with:
           comment: false
           qr-target: 'expo-go'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          command: eas update --auto --branch safe-pr-${{ fromJson(needs.check_comments.outputs.pr_details).number }}-${{ fromJson(needs.check_comments.outputs.pr_details).ref }}
+          command: eas update --auto --branch safe-pr-${{ github.event.pull_request.head.ref }}
       
-      - name: 💬 Comment PR
-        if: success()
-        uses: actions/github-script@v6
-        env:
-          PREVIEW_COMMENT: ${{steps.preview.outputs.comment}}
-          COMMIT_HASH: ${{steps.preview.outputs.gitCommitHash}}
-          CREATED_AT: ${{steps.preview.outputs.createdAt}}
+          
+      - name: Find Comment
+        uses: peter-evans/find-comment@v2
+        id: find_comment
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `${process.env.PREVIEW_COMMENT}
-              > commit hash: ${process.env.COMMIT_HASH}
-              > create time: ${process.env.CREATED_AT}`
-            })
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: Expo preview
+
+      - name: Create or Update Comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          body: |
+            ## Expo Preview
+            ${{steps.preview.outputs.comment}}
+            > Commit hash: ${{steps.preview.outputs.gitCommitHash}}
+            > Update published at: ${{ steps.preview.outputs.publishedTime }}
+          edit-mode: replace
