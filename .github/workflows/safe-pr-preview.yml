@@ -1,4 +1,4 @@
-name: Expo Preview
+name: Safe Expo Preview
 
 on:
   pull_request:
@@ -128,17 +128,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Comment PR
-        uses: actions/github-script@v6
+        uses: peter-evans/create-or-update-comment@v4
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const message = context.eventName === 'pull_request'
-              ? 'Sorry, we cannot create an Expo preview for pull requests from forked repositories due to security restrictions. A maintainer will need to manually trigger the preview.'
-              : 'Sorry, you do not have the required permissions to trigger an Expo preview. Please ask a maintainer to review and trigger the preview if necessary.';
-            
-            github.rest.issues.createComment({
-              issue_number: ${{ needs.check_permissions.outputs.pr_number }},
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            })
+          issue-number: ${{ needs.check_permissions.outputs.pr_number }}
+          if: context.eventName == 'pull_request'
+          body: Sorry, we cannot create an Expo preview for pull requests from forked repositories due to security restrictions. A maintainer will need to manually trigger the preview.
+
+      - name: Comment PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ needs.check_permissions.outputs.pr_number }}
+          if: context.eventName != 'pull_request'
+          body: Sorry, you do not have the required permissions to trigger an Expo preview. Please ask a maintainer to review and trigger the preview if necessary.
