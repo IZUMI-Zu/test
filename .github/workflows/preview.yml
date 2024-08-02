@@ -7,7 +7,6 @@ on:
 jobs:
   preview:
     runs-on: ubuntu-latest
-    environment: preview
     steps:
       - name: 🏗 Setup repo
         uses: actions/checkout@v3
